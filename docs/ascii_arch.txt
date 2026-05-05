@@ -1,0 +1,12 @@
+Multi-modal Input (Text/Image/Audio/Code)
+  → Multimodal Early Fusion Embedding (Shared token space for all modalities)
+  → Layer Normalization
+  → Dense Transformer Backbone (48-layer stack)
+       ├── MLA Hidden Attention (multi-head latent attention)
+       └── Dense Shared FFN (carries 45% of total parameters)
+  → Residual cascading
+  → Sparse Expert MoE (256 experts, Top-7 routed, for specialized tasks only)
+  → Native Tool Scheduler (multi-step planning, cross-software autonomous execution)
+  → RLHF Alignment Layer (human preference + safety compliance mapping)
+  → Final Normalization
+  → LM Head Output
