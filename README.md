@@ -151,7 +151,7 @@ this module simulates the behavioral effect, not the training process itself.
 - **NOT** a leaked or reverse-engineered source of GPT-4/GPT-4o
 - **NOT** a reproduction of OpenAI's training pipeline or weights
 - **NOT** a claim that GPT uses specific layer counts, MoE configurations, or KV compression
-- **NOT** a production model — purely educational toy implementations
+- **NOT** a production model — purely speculative research implementations
 
 ---
 
