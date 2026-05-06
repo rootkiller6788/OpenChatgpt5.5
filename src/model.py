@@ -3,49 +3,56 @@ import torch.nn as nn
 
 from .layers import (
     LayerNorm,
-    MultimodalEarlyFusionEmbedding,
+    MultimodalFrontend,
     DenseTransformerBlock,
-    SparseExpertMoE,
-    NativeToolScheduler,
-    RLHFAlignmentLayer,
+    SparseMoELayer,
+    ToolScheduler,
+    OutputAlignmentHead,
 )
 
 
-class GPT55FullArch(nn.Module):
-    """GPT-5.5 完整主模型 — 所有层串死，和架构图 1:1"""
+class ToyGPTBackbone(nn.Module):
+    """[Speculative] GPT 风格模型主干 — 稠密 Transformer + 可选 MoE
 
-    def __init__(self, vocab_size=50000, dim=8192, heads=64, layer_num=48):
+    从公开信息推断：GPT-4 是 dense transformer 架构（GPT-4 技术报告中提及），
+    GPT-4o 支持多模态。具体的层数、维度、MoE 配置均为纯推测。
+    """
+
+    def __init__(self, vocab_size=50000, dim=8192, heads=64, num_layers=16):
         super().__init__()
-
-        self.embedding = MultimodalEarlyFusionEmbedding(vocab_size, dim)
-
-        self.dense_blocks = nn.ModuleList(
-            [DenseTransformerBlock(dim, heads) for _ in range(layer_num)]
+        self.frontend = MultimodalFrontend(vocab_size, dim)
+        self.blocks = nn.ModuleList(
+            [DenseTransformerBlock(dim, heads) for _ in range(num_layers)]
         )
-
-        self.moe = SparseExpertMoE(dim, num_experts=256, top_k=7)
-        self.tool_engine = NativeToolScheduler(dim)
-        self.rlhf_align = RLHFAlignmentLayer(dim)
-
+        self.moe = SparseMoELayer(dim)
         self.norm_out = LayerNorm(dim)
         self.lm_head = nn.Linear(dim, vocab_size)
 
-    def forward(
-        self, text_ids, img_feat, audio_feat, code_feat, pos_ids, attention_mask=None
-    ):
-        x = self.embedding(text_ids, img_feat, audio_feat, code_feat, pos_ids)
-
-        for block in self.dense_blocks:
+    def forward(self, text_ids, img_feat=None, audio_feat=None, code_feat=None,
+                pos_ids=None, attention_mask=None):
+        x = self.frontend(text_ids, img_feat, audio_feat, code_feat, pos_ids)
+        for block in self.blocks:
             x = block(x, attention_mask)
-
         x = x + self.moe(x)
-
-        tool_logits, step_hidden = self.tool_engine(x)
-        x = x + step_hidden
-
-        x = self.rlhf_align(x)
-
         x = self.norm_out(x)
         logits = self.lm_head(x)
+        return logits
 
-        return logits, tool_logits
+
+class GPTStyleSystemRuntime(nn.Module):
+    """[Inferred] GPT 风格系统运行时 — 系统层组件
+
+    RLHF 是训练方法论，不是模型架构层。工具调用是系统层行为。
+    将这些从 backbone 中分离出来，避免暗示它们是 Transformer 内部层。
+    """
+
+    def __init__(self, dim=8192, tool_num=24):
+        super().__init__()
+        self.tool = ToolScheduler(dim, tool_num)
+        self.align = OutputAlignmentHead(dim)
+
+    def forward(self, x):
+        tool_logits, step_hidden = self.tool(x)
+        x = x + step_hidden
+        x = self.align(x)
+        return x, tool_logits

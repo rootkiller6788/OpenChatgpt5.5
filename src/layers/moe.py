@@ -4,10 +4,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class SparseExpertMoE(nn.Module):
-    """稀疏专项MoE — 256 路由专家，Top-7 激活，仅做专项补强"""
+class SparseMoELayer(nn.Module):
+    """[Speculative] 稀疏 MoE 层 — N 路由专家 top-k 激活
 
-    def __init__(self, dim=8192, num_experts=256, top_k=7):
+    MoE 是行业常用技术，但 OpenAI 未公开 GPT-4/5 是否使用 MoE 或具体结构。
+    当前为 naive 参考实现：每个 expert 对完整 batch 执行前向计算，
+    即使 mask 为空也算一遍，未做负载均衡。
+    """
+
+    def __init__(self, dim=8192, num_experts=256, top_k=8):
         super().__init__()
         self.num_experts = num_experts
         self.top_k = top_k
@@ -33,7 +38,7 @@ class SparseExpertMoE(nn.Module):
         out = torch.zeros_like(x)
         for k in range(self.top_k):
             expert_idx = top_idx[:, :, k]
-            w = top_weight[:, :, k : k + 1]
+            w = top_weight[:, :, k: k + 1]
             for e in range(self.num_experts):
                 token_mask = (expert_idx == e).unsqueeze(-1).float()
                 expert_out = self.experts[e](x)

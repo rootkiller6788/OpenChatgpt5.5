@@ -2,11 +2,11 @@
 import torch.nn as nn
 
 from .common import LayerNorm
-from .mla_attention import MLAHiddenAttention
+from .mla_attention import LatentCompressedAttention
 
 
-class DenseSharedFFN(nn.Module):
-    """稠密共享FFN — GPT-5.5 主干核心，占总参 45%"""
+class DenseFFN(nn.Module):
+    """[Speculative] 标准稠密 FFN — Linear → GELU → Linear"""
 
     def __init__(self, dim=8192, mlp_ratio=4):
         super().__init__()
@@ -19,14 +19,17 @@ class DenseSharedFFN(nn.Module):
 
 
 class DenseTransformerBlock(nn.Module):
-    """稠密 Transformer 块 — Pre-LN + MLA + 残差 + FFN，堆叠 48 层构成主干"""
+    """[Speculative] 标准 Transformer 块 — Pre-LN + Attention + FFN 残差
+
+    层数和维度均为纯推测，无官方证据。
+    """
 
     def __init__(self, dim=8192, heads=64):
         super().__init__()
         self.norm1 = LayerNorm(dim)
-        self.attn = MLAHiddenAttention(dim, heads)
+        self.attn = LatentCompressedAttention(dim, heads)
         self.norm2 = LayerNorm(dim)
-        self.ffn = DenseSharedFFN(dim)
+        self.ffn = DenseFFN(dim)
 
     def forward(self, x, mask):
         x = x + self.attn(self.norm1(x), mask)

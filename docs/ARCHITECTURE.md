@@ -1,47 +1,100 @@
-# GPT-5.5 Architecture
+# Architecture Discussion
 
-## Overview
+## Important Disclaimer
 
-GPT-5.5 is a dense Transformer backbone with sparse MoE specialization, featuring
-early multimodal fusion, MLA latent attention, native tool scheduling, and RLHF alignment.
+OpenAI has **not** publicly disclosed GPT-4/GPT-4o/GPT-5 internal model architecture.
+Layer count, hidden dimension, attention type, MoE structure — these are all unknown.
 
-## Key Components
+What IS known: from the GPT-4 Technical Report (dense transformer), from InstructGPT (RLHF methodology),
+from ChatGPT product behavior (multimodal, function calling). This document infers **behavioral system components**
+from those public signals. Implementation details are **speculative toy designs**.
 
-### 1. Multimodal Early Fusion Embedding
-Text / Image / Audio / Code → four separate projections → concatenated early fusion
-→ linear merge into unified token space → add position encoding.
-Key difference from Gemini: fusion happens at embedding stage, not later.
+---
 
-### 2. MLA Hidden Attention
-Multi-head latent attention with KV compression. Q/K/V projected with latent
-bottleneck on KV to reduce compute while preserving long-range logical consistency.
+## Evidence Hierarchy
 
-### 3. Dense Transformer Backbone (48 layers)
-Each block: Pre-LN → MLA → residual → Pre-LN → DenseSharedFFN → residual.
-The dense FFN carries ~45% of total parameters and handles general reasoning.
-Unlike Claude (RDT loop) and Gemini (CSA+HCA alternating), GPT-5.5 uses a
-pure 48-layer stack with homogeneous blocks.
+| Tag | Source |
+|-----|--------|
+| `[Observed]` | API/ChatGPT behavior, black-box testing |
+| `[Reported]` | OpenAI papers, blog posts, system cards |
+| `[Inferred]` | Reasonably deduced system component |
+| `[Speculative]` | Pure architectural hypothesis |
 
-### 4. Sparse Expert MoE (256 experts, Top-7)
-Used only for specialized domains (code, math, tool use). Does NOT participate
-in general semantic modeling — unlike Gemini/Claude where MoE handles all tokens.
+---
 
-### 5. Native Tool Scheduler
-Multi-step planning via LSTM scheduler + tool selection network.
-Fully autonomous (unlike Claude's passive tool layer).
+## Inferred System Components
 
-### 6. RLHF Alignment Layer
-Human preference alignment + safety constraint mask at the output stage.
+### 1. Multimodal Frontend
+`[Observed] + [Reported]`
 
-### Key Differences
+ChatGPT accepts text + images. GPT-4V introduced a vision encoder.
+The frontend must embed text tokens and project image patches into a unified hidden space.
 
-| Aspect | GPT-5.5 | Claude Mythos | Gemini 3.1 Pro |
-|--------|---------|--------------|----------------|
-| Backbone | 48-layer dense stack | 1-block RDT loop ×12 | 40-layer CSA+HCA |
-| Attention | MLA (latent KV) | Local window | CSA(4×)+HCA(128×) |
-| MoE role | Specialized only | All tokens | All tokens |
-| MoE experts | 256, top-7 | 64, top-2 | 256, top-8 |
-| Safety | RLHF alignment | Constitutional AI (pre+post) | None |
-| Tools | Autonomous scheduler | Passive (user-gated) | Autonomous (plan+verify) |
-| Fusion | Early fusion (embedding) | Type embeddings | Post-embedding concat |
-| Dim | 8192 | 4096 | 8192 |
+**Toy implementation:** `MultimodalFrontend` — text_emb + image_projector + audio_projector + code_projector.
+Each non-text modality projected to one special token (toy simplification, real systems use patch-level encoding).
+
+### 2. Dense Transformer Backbone
+`[Reported] + [Speculative]`
+
+GPT-4 Technical Report confirms transformer architecture but gives zero architectural details.
+Layer count, width, attention mechanism — all unknown.
+
+**Toy implementation:** `DenseTransformerBlock` — standard Pre-LN + attention + FFN.
+Stack count and dimension are arbitrary speculative choices.
+
+### 3. Latent Compressed Attention
+`[Speculative]`
+
+KV compression (latent bottleneck) is a well-known attention optimization technique.
+No evidence OpenAI uses this specific approach. The name "MLA" refers to DeepSeek's work,
+not OpenAI's.
+
+**Toy implementation:** `LatentCompressedAttention` with `latent_compress=8`.
+K/V compressed via Linear projection before computing attention.
+
+### 4. Sparse MoE
+`[Speculative]`
+
+OpenAI has not confirmed whether GPT-4 uses MoE. Various industry rumors exist but no
+official confirmation. This module is entirely speculative.
+
+**Toy implementation:** `SparseMoELayer` — naive expert computation (all experts run full forward
+regardless of routing mask).
+
+### 5. Tool Scheduler
+`[Observed] + [Inferred]`
+
+ChatGPT supports function calling with user-defined JSON schemas. The model must have
+a mechanism to select appropriate tools and generate structured tool calls.
+
+**Toy implementation:** `ToolScheduler` — plan_net for tool selection + LSTM for multi-step scheduling.
+LSTM-based scheduling is a speculative design choice.
+
+### 6. Output Alignment (RLHF)
+`[Reported] + [Inferred]`
+
+OpenAI published the RLHF methodology and confirmed its use. RLHF is a **training procedure**,
+not a neural network layer that runs during inference.
+
+**Toy implementation:** `OutputAlignmentHead` — simulates the behavioral effect of RLHF training
+as a forward-pass module. This is a deliberate simplification; real RLHF occurs during training,
+not as an inference-time layer.
+
+---
+
+## Architecture Split
+
+Model separated into two classes:
+
+### ToyGPTBackbone
+Pure model forward: multimodal token embedding → transformer blocks → LM head.
+
+### GPTStyleSystemRuntime
+System-layer behaviors that wrap the model:
+- Tool scheduling (plan + LSTM multi-step)
+- Output alignment (RLHF effect simulation)
+
+This split exists because:
+1. RLHF is a training methodology, not a forward-pass layer
+2. Tool calling is a system-layer concern (router → executor → observation → reinject)
+3. Embedding these as nn.Module layers inside the backbone would be architecturally misleading

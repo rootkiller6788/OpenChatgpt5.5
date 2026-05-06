@@ -1,7 +1,87 @@
-# GPT-5.5 Architecture Inference
+# GPT-style Dense Transformer Architecture Hypothesis
 
-Architecture inference of GPT-5.5 — a dense Transformer backbone with sparse MoE
-specialization. For learning and understanding the model structure.
+**Inferring GPT's system-level behavioral architecture from publicly observable signals.**
+
+This is **not** a reverse-engineering of GPT-4/GPT-4o/GPT-5 internal weights or source code.
+OpenAI has not publicly disclosed the internal model architecture of GPT-4, GPT-4o, or any subsequent
+model (layer count, attention type, MoE structure, hidden dimension, etc.).
+What IS publicly known are GPT's **capabilities, product mechanisms, tool-use behavior, multimodal support,
+and system-level interaction patterns** — observable through the ChatGPT product, API documentation, and OpenAI's published research.
+
+This project infers a **behavioral architecture** from those observables. Implementation details
+(specific layer counts, MoE structure, KV compression ratio) are **speculative toy implementations**
+labeled accordingly.
+
+---
+
+## Evidence Hierarchy
+
+| Tag | Meaning | Example Source |
+|-----|---------|---------------|
+| `[Observed]` | Directly observable through API/ChatGPT behavior and black-box testing | Function calling returns structured JSON; multimodal input accepted in ChatGPT |
+| `[Reported]` | Stated in OpenAI papers, blog posts, system cards | GPT-4 Technical Report mentions dense transformer; RLHF usage described in InstructGPT paper |
+| `[Inferred]` | Reasonably deduced system components from observed/reported behaviors | A tool router must exist to dispatch function calls; RLHF training produces aligned behavior |
+| `[Speculative]` | Pure architectural hypothesis / toy implementation | Specific layer count, KV compression ratio, MoE expert count |
+
+---
+
+## What Is Publicly Known About GPT
+
+### From OpenAI's Published Work
+
+**[Reported]** from official sources:
+- **GPT-4 Technical Report**: "GPT-4 is a Transformer-style model pre-trained to predict the next token... using publicly available data and data licensed from third-party providers." No architectural details disclosed.
+- **InstructGPT / RLHF**: OpenAI published the RLHF training methodology (`arxiv:2203.02155`).
+- **GPT-4V**: Multimodal support via vision encoder (publicly announced but architecture undisclosed).
+
+**[Observed]** through ChatGPT and API:
+- Function calling with structured JSON schemas
+- Multimodal input (text + image) in ChatGPT
+- Long context support (128K)
+- Structured output (JSON mode)
+- Tool/plugin orchestration in ChatGPT
+
+---
+
+## Inferred System-Level Architecture
+
+Based on observable behaviors and publicly reported information:
+
+```
+User Input
+    │
+    ▼
+[Inferred]  Multimodal Frontend
+[Observed]  Accepts text + image in ChatGPT
+[Reported]  GPT-4V uses vision encoder + text tokenizer
+    │
+    ├─ Text tokenizer / embedding
+    ├─ Image encoder / patch projector
+    └─ (Code/Audio speculative)
+    │
+    ▼
+[Reported]  Dense Transformer Backbone
+[Reported]  GPT-4 Technical Report confirms transformer architecture
+[Speculative] Specific depth, width, attention mechanism
+[Speculative] Latent KV compression for efficiency
+    │
+    ▼
+[Speculative] Optional Sparse MoE FFN
+[Speculative] Expert count, routing mechanism unknown
+    │
+    ▼
+[Observed]  Tool-use Runtime
+[Observed]  Function calling with structured schemas
+[Inferred]  Tool planner/scheduler + executor
+    │
+    ▼
+[Reported]  RLHF Alignment
+[Reported]  RLHF used in training (InstructGPT)
+[Observed]  Aligned, safety-conscious outputs
+    │
+    ▼
+Output
+```
 
 ---
 
@@ -11,90 +91,67 @@ specialization. For learning and understanding the model structure.
 openchatgpt/
 ├── src/
 │   ├── __init__.py
-│   ├── model.py                  # GPT-5.5 full main model
+│   ├── model.py                        # ToyGPTBackbone + GPTStyleSystemRuntime
 │   └── layers/
-│       ├── __init__.py           # Unified exports
-│       ├── common.py             # LayerNorm base component
-│       ├── embedding.py          # Early fusion embedding (text/image/audio/code)
-│       ├── mla_attention.py      # MLA Multi-head Latent Attention
-│       ├── dense_block.py        # DenseSharedFFN + DenseTransformerBlock
-│       ├── moe.py                # Sparse Expert MoE (256 experts)
-│       ├── tool_engine.py        # Native tool scheduling engine
-│       └── rlhf_align.py         # RLHF alignment layer
+│       ├── __init__.py
+│       ├── common.py                   # [Inferred] LayerNorm
+│       ├── embedding.py                # [Speculative] MultimodalFrontend
+│       ├── mla_attention.py            # [Speculative] LatentCompressedAttention
+│       ├── dense_block.py              # [Speculative] DenseFFN + DenseTransformerBlock
+│       ├── moe.py                      # [Speculative] SparseMoELayer (naive ref impl)
+│       ├── tool_engine.py              # [Inferred] ToolScheduler
+│       └── rlhf_align.py               # [Inferred] OutputAlignmentHead
 ├── demo/
-│   └── infer_demo.py             # Inference demo entry point
+│   └── infer_demo.py                   # Forward pass verification
 ├── docs/
-│   ├── ARCHITECTURE.md           # Architecture deep-dive (with 3-model comparison)
-│   └── ascii_arch.txt            # ASCII architecture diagram
-├── assets/                       # Architecture diagram (TBD)
+│   ├── ARCHITECTURE.md
+│   └── ascii_arch.txt
+├── assets/
 ├── requirements.txt
 ├── .gitignore
-└── LICENSE
+├── LICENSE
+└── openchatgpt.txt
 ```
 
 ---
 
-## How to Read This Project
+## Component Evidence Mapping
 
-### Recommended Reading Order (Bottom-Up)
-
-**Step 1: Base Components** — `src/layers/common.py`
-- `LayerNorm`: shared across all three models.
-
-**Step 2: Embedding Layer** — `src/layers/embedding.py`
-- `MultimodalEarlyFusionEmbedding`: Each of the four modalities (text/image/audio/code) is independently projected to 8192 dims, concatenated to `dim*4`, then merged back to `dim` via `fusion_merge`, and finally position embeddings are added.
-- This is GPT-5.5's most distinctive embedding design — **Early Fusion** fuses all modal information at the embedding stage, unlike Gemini's post-concatenation approach.
-- Key insight: Note how `repeat(1, T_txt, 1)` broadcasts single-vector modality features across the full text sequence for per-token fusion.
-
-**Step 3: MLA Attention** — `src/layers/mla_attention.py`
-- `MLAHiddenAttention`: MLA = Multi-head Latent Attention. Core feature is **KV latent compression** — after Q/K/V projection, an additional bottleneck compression (`dim → dim/8`) is applied to K and V. Attention is computed in the compressed latent space, reducing compute while preserving long-range logical consistency.
-- Compare: Gemini uses Conv1d to compress KV (CSA/HCA); GPT-5.5 uses linear projection — different mechanisms, same goal.
-
-**Step 4: Dense Backbone** — `src/layers/dense_block.py`
-- `DenseSharedFFN`: Standard `Linear → GELU → Linear`, but **shared** — it carries ~45% of total parameters and handles general reasoning capability.
-- `DenseTransformerBlock`: Pre-LN → MLA → residual → Pre-LN → DenseSharedFFN → residual. A standard Pre-Norm Transformer block.
-- GPT-5.5 stacks **48 layers** of these homogeneous blocks to form the backbone. Compare: Claude has only 1 block looped 12 times; Gemini has 40 alternating CSA/HCA blocks.
-
-**Step 5: MoE and Tools** — `src/layers/moe.py` → `src/layers/tool_engine.py`
-- `SparseExpertMoE`: 256 experts, top-7 routing. Key positioning: **does not participate in general semantic modeling — only reinforces code/math/tool specialization**. This differs from Claude/Gemini where MoE handles all token inference.
-- `NativeToolScheduler`: Two-stage — (1) `plan_net` outputs selection probabilities for 24 tools, (2) `LSTM` performs multi-step temporal scheduling, with hidden states fused back into the main representation. Fully autonomous, unlike Claude's passive tool layer.
-
-**Step 6: RLHF Alignment** — `src/layers/rlhf_align.py`
-- `RLHFAlignmentLayer`: Alignment projection + safety constraint mask, added together as the final aligned output. This is GPT-5.5's safety mechanism, compared to Claude's pre+post Constitutional AI dual check.
-
-**Step 7: Assemble Everything** — `src/model.py`
-- `GPT55FullArch`: Embedding → 48-layer dense backbone → MoE residual reinforcement → tool scheduling → RLHF alignment → norm → LM head.
+| Component | File | Evidence | Rationale |
+|-----------|------|----------|-----------|
+| Multimodal Frontend | `embedding.py` | [Inferred] + [Observed] | ChatGPT accepts text+image; GPT-4V vision encoder reported |
+| Latent Compressed Attention | `mla_attention.py` | [Speculative] | KV compression is a common optimization; no evidence OpenAI uses this specific form |
+| Dense Transformer Block | `dense_block.py` | [Inferred] + [Reported] | GPT-4 Technical Report confirms transformer; specific architecture unknown |
+| Sparse MoE Layer | `moe.py` | [Speculative] | MoE is industry-common; GPT-4 MoE usage unconfirmed by OpenAI |
+| Tool Scheduler | `tool_engine.py` | [Inferred] + [Observed] | Function calling observed; scheduling mechanism inferred |
+| Output Alignment Head | `rlhf_align.py` | [Reported] + [Inferred] | RLHF is published methodology; simulating alignment as a head is speculative |
+| LayerNorm | `common.py` | [Inferred] | Universally present in transformer architectures |
 
 ---
 
-## Data Flow
+## Architecture Split
 
+### ToyGPTBackbone (pure model forward)
 ```
-Input (text_ids, img_feat, audio_feat, code_feat, pos_ids)
-  │
-  ▼
-MultimodalEarlyFusionEmbedding   —— four modalities individually projected → concat → fusion merge + pos
-  │
-  ▼
-┌─ DenseTransformerBlock × 48 ──┐
-│   ├─ Pre-LN                     │
-│   ├─ MLAHiddenAttention          │  ← KV latent compression
-│   ├─ Pre-LN                     │
-│   └─ DenseSharedFFN             │  ← ~45% of total params
-└────────────────────────────────┘
-  │
-  ▼
-SparseExpertMoE                 —— 256 experts, top-7 (specialized only)
-  │
-  ▼
-NativeToolScheduler             —— tool selection + LSTM multi-step scheduling
-  │
-  ▼
-RLHFAlignmentLayer              —— preference alignment + safety constraint
-  │
-  ▼
-LayerNorm → LM Head             —— final norm → logits output
+MultimodalFrontend → [DenseTransformerBlock × N] → SparseMoE → Norm → LM Head
 ```
+Text/image/audio/code → hidden → logits. All specific choices `[Speculative]`.
+
+### GPTStyleSystemRuntime (system-layer)
+```
+ToolScheduler → OutputAlignmentHead
+```
+Tool planning + RLHF-mediated alignment. RLHF is a training methodology, not an architecture layer;
+this module simulates the behavioral effect, not the training process itself.
+
+---
+
+## What This Project Is NOT
+
+- **NOT** a leaked or reverse-engineered source of GPT-4/GPT-4o
+- **NOT** a reproduction of OpenAI's training pipeline or weights
+- **NOT** a claim that GPT uses specific layer counts, MoE configurations, or KV compression
+- **NOT** a production model — purely educational toy implementations
 
 ---
 
@@ -106,48 +163,20 @@ python -m venv venv
 venv\Scripts\activate      # Windows
 # source venv/bin/activate  # Linux/macOS
 
-# Install dependencies
 pip install -r requirements.txt
 ```
 
 ```bash
-# Run inference demo (verify model forward pass)
 python demo/infer_demo.py
 ```
 
 ---
 
-## Key Parameters
+## References
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `dim` | 8192 | Hidden dimension |
-| `heads` | 64 | Attention heads |
-| `head_dim` | 128 | Per-head dimension (8192/64) |
-| `layer_num` | 48 | Dense Transformer block stack count |
-| `vocab_size` | 50000 | Vocabulary size |
-| `num_experts` | 256 | Number of routed experts |
-| `top_k (MoE)` | 7 | Tokens activated per expert |
-| `latent_compress` | 8 | MLA KV latent compression ratio |
-| `mlp_ratio` | 4 | DenseSharedFFN expansion ratio |
-| `max_pos` | 262144 | Maximum position embedding length |
-| `tool_num` | 24 | Number of supported tools |
-| `code_dim` | 4096 | Code modality input dimension |
-| `img_dim` | 2048 | Image modality input dimension |
-| `audio_dim` | 1024 | Audio modality input dimension |
-
----
-
-## Three-Model Architecture Comparison
-
-| Aspect | GPT-5.5 | Claude Mythos | Gemini 3.1 Pro |
-|--------|---------|--------------|----------------|
-| **Depth approach** | 48-layer stack | RDT loop (weight reuse ×12) | 40-layer CSA+HCA alternating |
-| **Attention** | MLA (latent KV compression) | Local window (128) | CSA(4×)+HCA(128×) |
-| **MoE role** | Specialized only | All tokens | All tokens |
-| **MoE scale** | 256 experts / top-7 | 64 experts / top-2 | 256 experts / top-8 |
-| **Modal fusion** | Early fusion (embedding stage) | Type embeddings | Post-embedding concat |
-| **Safety** | RLHF alignment layer | Constitutional AI (pre+post) | None |
-| **Tool strategy** | Autonomous scheduler (LSTM) | Passive (user-gated) | Autonomous (plan→verify) |
-| **Dimension** | 8192 | 4096 | 8192 |
-| **Total layers** | 48 | 1 (looped 12 times) | 40 |
+### OpenAI Sources (public)
+- GPT-4 Technical Report (`arxiv:2303.08774`)
+- Training language models to follow instructions with human feedback / InstructGPT (`arxiv:2203.02155`)
+- GPT-4V(ision) System Card
+- OpenAI API documentation
+- ChatGPT product behavior

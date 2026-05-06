@@ -1,19 +1,19 @@
 # src/layers/__init__.py
 from .common import LayerNorm
-from .embedding import MultimodalEarlyFusionEmbedding
-from .mla_attention import MLAHiddenAttention
-from .dense_block import DenseSharedFFN, DenseTransformerBlock
-from .moe import SparseExpertMoE
-from .tool_engine import NativeToolScheduler
-from .rlhf_align import RLHFAlignmentLayer
+from .embedding import MultimodalFrontend
+from .mla_attention import LatentCompressedAttention
+from .dense_block import DenseFFN, DenseTransformerBlock
+from .moe import SparseMoELayer
+from .tool_engine import ToolScheduler
+from .rlhf_align import OutputAlignmentHead
 
 __all__ = [
     "LayerNorm",
-    "MultimodalEarlyFusionEmbedding",
-    "MLAHiddenAttention",
-    "DenseSharedFFN",
+    "MultimodalFrontend",
+    "LatentCompressedAttention",
+    "DenseFFN",
     "DenseTransformerBlock",
-    "SparseExpertMoE",
-    "NativeToolScheduler",
-    "RLHFAlignmentLayer",
+    "SparseMoELayer",
+    "ToolScheduler",
+    "OutputAlignmentHead",
 ]

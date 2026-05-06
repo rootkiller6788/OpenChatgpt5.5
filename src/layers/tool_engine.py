@@ -2,8 +2,13 @@
 import torch.nn as nn
 
 
-class NativeToolScheduler(nn.Module):
-    """原生工具调度引擎 — 多步骤规划 / 跨软件自主执行"""
+class ToolScheduler(nn.Module):
+    """[Inferred] 工具调度器 — 工具选择 + 多步时序规划
+
+    从 ChatGPT 可观察的 function calling 行为推断：GPT 支持多步骤工具调用。
+    当前为 toy 架构假设，LSTM 多步调度器是纯推测性设计。
+    实际工具调度更接近系统层（tool router → executor → observation → reinject）。
+    """
 
     def __init__(self, dim=8192, tool_num=24):
         super().__init__()
